@@ -1,3 +1,13 @@
+
+extern "C"
+{
+#include "nvs_flash.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "wifi_provisioning/manager.h"
+#include "wifi_provisioning/scheme_ble.h"
+}
+
 #include <Arduino.h>
 #include <LiquidCrystal_I2C.h> // LCD display library
 #include <Wire.h>
@@ -6,7 +16,6 @@
 #include <SPI.h>               // Serial Peripheral Interface library
 #include "FS.h"
 #include "SPIFFS.h"
-#include "WiFiProv.h"
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 #include <Preferences.h>
@@ -20,15 +29,11 @@
 #include "FirmwareVersionCheck.h"
 #include "WIFII.h"
 #include "eraseCredentials.h"
-#include "SysProvEvent.h"
 #include "shutDown.h"
 #include "openSched.h"
 #include "setupPIDs.h"
 #include "btnBounce.h"
 #include "htrControl.h"
-
-
-
 
 const int lcdRefresh = 2500; // Refresh rate to update screen when running (ms)
 const int maxTemp = 1302;    // Maximum temperature (degrees).  If reached, will shut down.
@@ -56,7 +61,6 @@ void setup()
   WiFi.setHostname(DeviceName);
   WiFi.begin();
 
-
   Wire.setClock(10000);
   Wire.beginTransmission(0);
   Wire.write(0x0C);
@@ -72,8 +76,6 @@ void setup()
   lcd.init();
   lcd.backlight();
 
-
-
   // Setup SD card
   if (!SPIFFS.begin(true))
   {
@@ -84,7 +86,6 @@ void setup()
     lcd.print(F("Reiniciar"));
     shutDown();
   }
-
 
   // Intro screens
 
@@ -110,6 +111,36 @@ void setup()
   Serial.begin(115200);
 }
 
+void startProvisioning()
+{
+  // Initialize NVS
+  esp_err_t ret = nvs_flash_init();
+  if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+  {
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    ESP_ERROR_CHECK(nvs_flash_init());
+  }
+
+  // Initialize the default event loop
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+  // Provisioning configuration
+  wifi_prov_mgr_config_t config = {
+    .scheme = wifi_prov_scheme_ble,
+    .scheme_event_handler = WIFI_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BTDM
+};
+
+  // Initialize provisioning manager
+  ESP_ERROR_CHECK(wifi_prov_mgr_init(config));
+
+  const char *service_name = DeviceName; // your BLE name
+  const char *pop = "abcd1234";          // proof-of-possession
+
+  ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(WIFI_PROV_SECURITY_1, pop, service_name, NULL));
+
+  // You may register event handlers if needed
+}
+
 //******************************************************************************************************************************
 //  LOOP: MAIN LOOP (CONTINUOUS)
 //******************************************************************************************************************************
@@ -118,7 +149,8 @@ void loop()
 
   // NEW INTERFACE
 
-  if (interface == 0) {
+  if (interface == 0)
+  {
 
     // Up arrow button
     if (digitalRead(upPin) == LOW)
@@ -675,13 +707,11 @@ void loop()
         updateLCD();
         delay(300);
       }
-
-
     }
   }
 
-
-  if (interface == 4) {
+  if (interface == 4)
+  {
     // Up arrow button
     if (digitalRead(upPin) == LOW)
     {
@@ -707,27 +737,28 @@ void loop()
     // Select button
     if (digitalRead(selectPin) == LOW)
     {
-      if (optionNum == 1) {
-        if (WiFi.status() != WL_CONNECTED && Provisioned == false) {
+      if (optionNum == 1)
+      {
+        if (WiFi.status() != WL_CONNECTED && Provisioned == false)
+        {
           lcd.clear();
           lcd.setCursor(4, 1);
           lcd.print(F("Buscando Red"));
           lcd.setCursor(2, 2);
           lcd.print(F("Continuar en App"));
 
-          WiFi.onEvent(SysProvEvent);
-          WiFiProv.beginProvision(WIFI_PROV_SCHEME_BLE, WIFI_PROV_SCHEME_HANDLER_FREE_BTDM, WIFI_PROV_SECURITY_0, "abcd1234", DeviceName, NULL, NULL);
+          startProvisioning(); // ✅ Starts native BLE provisioning (ESP-IDF)
 
-
-
-          while (Provisioned == false) {
-            delay(1);
+          while (Provisioned == false)
+          {
+            delay(1); // wait for provisioning-done handler to flip the flag
           }
+
           delay(1000);
-
-
         }
-        if (WiFi.status() == WL_CONNECTED && Provisioned == true) {
+
+        if (WiFi.status() == WL_CONNECTED && Provisioned == true)
+        {
           lcd.clear();
           lcd.print(F(" "));
           lcd.setCursor(2, 1);
@@ -738,7 +769,9 @@ void loop()
           updateLCD();
           delay(300);
         }
-        if (WiFi.status() != WL_CONNECTED && Provisioned == true) {
+
+        if (WiFi.status() != WL_CONNECTED && Provisioned == true)
+        {
           lcd.clear();
           lcd.print(F(" "));
           lcd.setCursor(2, 1);
@@ -763,8 +796,6 @@ void loop()
         delay(300);
       }
 
-
-
       if (optionNum == 3)
       {
         interface = 3;
@@ -773,7 +804,5 @@ void loop()
         delay(300);
       }
     }
-
-  }
-
+  } 
 }
